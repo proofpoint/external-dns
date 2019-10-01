@@ -46,6 +46,7 @@ const (
 	providerSpecificGeolocationCountryCode     = "aws/geolocation-country-code"
 	providerSpecificGeolocationSubdivisionCode = "aws/geolocation-subdivision-code"
 	providerSpecificMultiValueAnswer           = "aws/multi-value-answer"
+	providerSpecificHealthCheckID              = "aws/health-check-id"
 )
 
 var (
@@ -290,6 +291,11 @@ func (p *AWSProvider) records(zones map[string]*route53.HostedZone) ([]*endpoint
 			for _, ep := range newEndpoints {
 				if r.SetIdentifier != nil {
 					ep.SetIdentifier = aws.StringValue(r.SetIdentifier)
+
+					if r.HealthCheckId != nil {
+						ep.WithProviderSpecific(providerSpecificHealthCheckID, aws.StringValue(r.HealthCheckId))
+					}
+
 					switch {
 					case r.Weight != nil:
 						ep.WithProviderSpecific(providerSpecificWeight, fmt.Sprintf("%d", aws.Int64Value(r.Weight)))
@@ -557,6 +563,10 @@ func (p *AWSProvider) newChange(action string, ep *endpoint.Endpoint, recordsCac
 		}
 		if useGeolocation {
 			change.ResourceRecordSet.GeoLocation = geolocation
+		}
+
+		if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckID); ok {
+			change.ResourceRecordSet.HealthCheckId = aws.String(prop.Value)
 		}
 	}
 
