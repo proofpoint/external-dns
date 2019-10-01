@@ -47,6 +47,16 @@ const (
 	providerSpecificGeolocationSubdivisionCode = "aws/geolocation-subdivision-code"
 	providerSpecificMultiValueAnswer           = "aws/multi-value-answer"
 	providerSpecificHealthCheckID              = "aws/health-check-id"
+
+	providerSpecificHealthCheckDisabled         = "aws/health-check-disabled"
+	providerSpecificHealthCheckEnableSNI        = "aws/health-check-enable-sni"
+	providerSpecificHealthCheckFailureThreshold = "aws/health-check-failure-threshold"
+	providerSpecificHealthCheckFQDN             = "aws/health-check-fqdn"
+	providerSpecificHealthCheckInverted         = "aws/health-check-inverted"
+	providerSpecificHealthCheckPort             = "aws/health-check-port"
+	providerSpecificHealthCheckRequestInterval  = "aws/health-check-interval"
+	providerSpecificHealthCheckResourcePath     = "aws/health-check-resource-path"
+	providerSpecificHealthCheckType             = "aws/health-check-type"
 )
 
 var (
@@ -759,4 +769,55 @@ func cleanZoneID(ID string) string {
 		ID = strings.TrimPrefix(ID, "/hostedzone/")
 	}
 	return ID
+}
+
+func addDefaultAWSProviderSpecificAnnotations(annotations map[string]string) endpoint.ProviderSpecific {
+	return addDefaultHealthCheckAnnotations(annotations)
+}
+
+// when creating health check using annotations provided on resource, AWS provide default values for
+// some of the fields. Because of that now source.Record.ProviderSpecific is always different from provider.Record.ProviderSpecific
+// This function adds those default values in source.Record.ProviderSpecific to make sure they are same
+func addDefaultHealthCheckAnnotations(annotations map[string]string) endpoint.ProviderSpecific {
+	x := getAnnotationKeyFromSuffix(providerSpecificHealthCheckFQDN)
+	// log.Infof("key: %s", x)
+
+	if _, ok := annotations[x]; !ok {
+		// log.Infof("not found so returning %s", annotations)
+		// This is a mandatory field when creating health check. If its not present in annotations
+		// then we do not need to add the other default health check values
+		return nil
+	}
+
+	props := []endpoint.ProviderSpecificProperty{}
+	for _, providerSpecificKey := range []string{providerSpecificHealthCheckFailureThreshold, providerSpecificHealthCheckRequestInterval} {
+
+		annotationKey := getAnnotationKeyFromSuffix(providerSpecificKey)
+		annotationValue := annotations[annotationKey]
+
+		switch {
+		case providerSpecificKey == providerSpecificHealthCheckFailureThreshold && annotationValue == "":
+			annotationValue = "3"
+		case providerSpecificKey == providerSpecificHealthCheckRequestInterval && annotationValue == "":
+			annotationValue = "30"
+		}
+
+		if annotationValue == "" {
+			continue
+		}
+
+		// log.Infof("adding value %s for key %s", annotationValue, providerSpecificKey)
+
+		props = append(props, endpoint.ProviderSpecificProperty{
+			Name:  providerSpecificKey,
+			Value: annotationValue,
+		})
+	}
+
+	return props
+}
+
+func getAnnotationKeyFromSuffix(suffix string) string {
+	k := strings.TrimPrefix(suffix, "aws/")
+	return fmt.Sprintf("external-dns.alpha.kubernetes.io/aws-%s", k)
 }

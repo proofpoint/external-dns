@@ -50,3 +50,8 @@ func ensureTrailingDot(hostname string) string {
 
 	return strings.TrimSuffix(hostname, ".") + "."
 }
+
+//AddDefaultProviderSpecificAnnotations returns provider specific property defaults if needed
+func AddDefaultProviderSpecificAnnotations(annotations map[string]string) []endpoint.ProviderSpecificProperty {
+	return addDefaultAWSProviderSpecificAnnotations(annotations)
+}

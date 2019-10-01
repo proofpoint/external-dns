@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/kubernetes-incubator/external-dns/endpoint"
+	"github.com/kubernetes-incubator/external-dns/provider"
 )
 
 const (
@@ -116,6 +117,9 @@ func getProviderSpecificAnnotations(annotations map[string]string) (endpoint.Pro
 			})
 		}
 	}
+
+	providerSpecificAnnotations = append(providerSpecificAnnotations, provider.AddDefaultProviderSpecificAnnotations(annotations)...)
+
 	return providerSpecificAnnotations, setIdentifier
 }
 
