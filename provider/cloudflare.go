@@ -29,7 +29,6 @@ import (
 
 	"github.com/kubernetes-incubator/external-dns/endpoint"
 	"github.com/kubernetes-incubator/external-dns/plan"
-	"github.com/kubernetes-incubator/external-dns/source"
 )
 
 const (
@@ -41,6 +40,9 @@ const (
 	cloudFlareUpdate = "UPDATE"
 	// defaultCloudFlareRecordTTL 1 = automatic
 	defaultCloudFlareRecordTTL = 1
+
+	//cloudflareProxiedKey is local const for cloudFlareProxiedKey
+	cloudflareProxiedKey = "external-dns.alpha.kubernetes.io/cloudflare-proxied"
 )
 
 var cloudFlareTypeNotSupported = map[string]bool{
@@ -337,10 +339,10 @@ func shouldBeProxied(endpoint *endpoint.Endpoint, proxiedByDefault bool) bool {
 	proxied := proxiedByDefault
 
 	for _, v := range endpoint.ProviderSpecific {
-		if v.Name == source.CloudflareProxiedKey {
+		if v.Name == cloudflareProxiedKey {
 			b, err := strconv.ParseBool(v.Value)
 			if err != nil {
-				log.Errorf("Failed to parse annotation [%s]: %v", source.CloudflareProxiedKey, err)
+				log.Errorf("Failed to parse annotation [%s]: %v", cloudflareProxiedKey, err)
 			} else {
 				proxied = b
 			}
@@ -385,7 +387,7 @@ func groupByNameAndType(records []cloudflare.DNSRecord) []*endpoint.Endpoint {
 				records[0].Type,
 				endpoint.TTL(records[0].TTL),
 				targets...).
-				WithProviderSpecific(source.CloudflareProxiedKey, strconv.FormatBool(records[0].Proxied)))
+				WithProviderSpecific(cloudflareProxiedKey, strconv.FormatBool(records[0].Proxied)))
 	}
 
 	return endpoints
