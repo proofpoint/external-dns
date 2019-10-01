@@ -584,9 +584,17 @@ func (p *AWSProvider) newChange(action string, ep *endpoint.Endpoint, recordsCac
 }
 
 func (p *AWSProvider) tagsForZone(zoneID string) (map[string]string, error) {
+	return p.tagsForResource(zoneID, route53.TagResourceTypeHostedzone)
+}
+
+func (p *AWSProvider) tagsForHealthCheck(zoneID string) (map[string]string, error) {
+	return p.tagsForResource(zoneID, route53.TagResourceTypeHealthcheck)
+}
+
+func (p *AWSProvider) tagsForResource(resourceID, resourceType string) (map[string]string, error) {
 	response, err := p.client.ListTagsForResource(&route53.ListTagsForResourceInput{
-		ResourceType: aws.String("hostedzone"),
-		ResourceId:   aws.String(zoneID),
+		ResourceType: aws.String(resourceType),
+		ResourceId:   aws.String(resourceID),
 	})
 	if err != nil {
 		return nil, err
