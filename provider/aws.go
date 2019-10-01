@@ -821,3 +821,13 @@ func getAnnotationKeyFromSuffix(suffix string) string {
 	k := strings.TrimPrefix(suffix, "aws/")
 	return fmt.Sprintf("external-dns.alpha.kubernetes.io/aws-%s", k)
 }
+
+func isExternalDNSOwner(tagset map[string]string) bool {
+	for tagKey := range tagset {
+		if tagKey == "owner" {
+			return true
+		}
+	}
+
+	return false
+}
