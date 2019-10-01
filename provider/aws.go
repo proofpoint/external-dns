@@ -831,3 +831,92 @@ func isExternalDNSOwner(tagset map[string]string) bool {
 
 	return false
 }
+
+func healthCheckToProviderSpecific(hc *route53.HealthCheck, ep *endpoint.Endpoint) {
+	hcConfig := hc.HealthCheckConfig
+
+	if hcConfig.Disabled != nil && *hcConfig.Disabled {
+		ep.WithProviderSpecific(providerSpecificHealthCheckDisabled, fmt.Sprintf("%t", aws.BoolValue(hcConfig.Disabled)))
+	}
+
+	if hcConfig.Port != nil {
+		ep.WithProviderSpecific(providerSpecificHealthCheckPort, fmt.Sprintf("%d", aws.Int64Value(hcConfig.Port)))
+	}
+
+	if hcConfig.FailureThreshold != nil {
+		ep.WithProviderSpecific(providerSpecificHealthCheckFailureThreshold, fmt.Sprintf("%d", aws.Int64Value(hcConfig.FailureThreshold)))
+	}
+
+	if hcConfig.EnableSNI != nil && *hcConfig.EnableSNI {
+		ep.WithProviderSpecific(providerSpecificHealthCheckEnableSNI, fmt.Sprintf("%t", aws.BoolValue(hcConfig.EnableSNI)))
+	}
+
+	if hcConfig.FullyQualifiedDomainName != nil {
+		ep.WithProviderSpecific(providerSpecificHealthCheckFQDN, aws.StringValue(hcConfig.FullyQualifiedDomainName))
+	}
+
+	if hcConfig.Inverted != nil && *hcConfig.Inverted {
+		ep.WithProviderSpecific(providerSpecificHealthCheckInverted, fmt.Sprintf("%t", aws.BoolValue(hcConfig.Inverted)))
+	}
+
+	if hcConfig.RequestInterval != nil {
+		ep.WithProviderSpecific(providerSpecificHealthCheckRequestInterval, fmt.Sprintf("%d", aws.Int64Value(hcConfig.RequestInterval)))
+	}
+
+	if hcConfig.ResourcePath != nil {
+		ep.WithProviderSpecific(providerSpecificHealthCheckResourcePath, aws.StringValue(hcConfig.ResourcePath))
+	}
+
+	if hcConfig.Type != nil {
+		ep.WithProviderSpecific(providerSpecificHealthCheckType, strings.ToUpper(aws.StringValue(hcConfig.Type)))
+	}
+}
+
+func providerSpecificToHealthCheck(ep *endpoint.Endpoint) *route53.HealthCheckConfig {
+	hcConfig := &route53.HealthCheckConfig{}
+
+	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckDisabled); ok {
+		hcConfig.Disabled = aws.Bool(prop.Value == "true")
+	}
+
+	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckPort); ok {
+		//TODO error check
+		x, _ := strconv.Atoi(prop.Value)
+		hcConfig.Port = aws.Int64(int64(x))
+	}
+
+	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckFailureThreshold); ok {
+		//TODO error check
+		x, _ := strconv.Atoi(prop.Value)
+		hcConfig.FailureThreshold = aws.Int64(int64(x))
+	}
+
+	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckEnableSNI); ok {
+		hcConfig.EnableSNI = aws.Bool(prop.Value == "true")
+	}
+
+	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckFQDN); ok {
+		hcConfig.FullyQualifiedDomainName = aws.String(prop.Value)
+	}
+
+	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckInverted); ok {
+		hcConfig.Inverted = aws.Bool(prop.Value == "true")
+	}
+
+	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckRequestInterval); ok {
+		//TODO error check
+		x, _ := strconv.Atoi(prop.Value)
+		hcConfig.RequestInterval = aws.Int64(int64(x))
+	}
+
+	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckResourcePath); ok {
+		hcConfig.ResourcePath = aws.String(prop.Value)
+	}
+
+	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckType); ok {
+		//TODO: use enum?
+		hcConfig.Type = aws.String(strings.ToUpper(prop.Value))
+	}
+
+	return hcConfig
+}
