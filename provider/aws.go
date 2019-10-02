@@ -112,6 +112,10 @@ type Route53API interface {
 	CreateHostedZone(*route53.CreateHostedZoneInput) (*route53.CreateHostedZoneOutput, error)
 	ListHostedZonesPages(input *route53.ListHostedZonesInput, fn func(resp *route53.ListHostedZonesOutput, lastPage bool) (shouldContinue bool)) error
 	ListTagsForResource(input *route53.ListTagsForResourceInput) (*route53.ListTagsForResourceOutput, error)
+	GetHealthCheck(input *route53.GetHealthCheckInput) (*route53.GetHealthCheckOutput, error)
+	CreateHealthCheck(input *route53.CreateHealthCheckInput) (*route53.CreateHealthCheckOutput, error)
+	ChangeTagsForResource(input *route53.ChangeTagsForResourceInput) (*route53.ChangeTagsForResourceOutput, error)
+	ListHealthChecks(input *route53.ListHealthChecksInput) (*route53.ListHealthChecksOutput, error)
 }
 
 // AWSProvider is an implementation of Provider for AWS Route53.
@@ -130,6 +134,7 @@ type AWSProvider struct {
 	// filter hosted zones by tags
 	zoneTagFilter ZoneTagFilter
 	preferCNAME   bool
+	healthChecks  []healthCheck
 }
 
 // AWSConfig contains configuration to create a new AWS provider.
@@ -303,7 +308,28 @@ func (p *AWSProvider) records(zones map[string]*route53.HostedZone) ([]*endpoint
 					ep.SetIdentifier = aws.StringValue(r.SetIdentifier)
 
 					if r.HealthCheckId != nil {
-						ep.WithProviderSpecific(providerSpecificHealthCheckID, aws.StringValue(r.HealthCheckId))
+						tags, err := p.tagsForHealthCheck(aws.StringValue(r.HealthCheckId))
+						if err != nil {
+							log.Errorf("failed to get health check tags for health check id %s. error: %v", r.HealthCheckId, err)
+							return false
+						}
+
+						if isExternalDNSOwner(tags) == false {
+							// this check was not created by external-dns
+							ep.WithProviderSpecific(providerSpecificHealthCheckID, aws.StringValue(r.HealthCheckId))
+						} else {
+							// this health id was created by external-dns, so dont add healthCheckId it to providerSpecific
+							// instead get the health check config and convert them to providerspecific
+							// because those annotations were most likely used to create the health check
+							// so we will need these to compare them with what is in the source annotations
+							// and make changes accordingly.
+							healthCheck, err := p.getHealthCheck(aws.StringValue(r.HealthCheckId))
+							if err != nil {
+								log.Errorf("failed to get health check with id %q. error: %v", r.HealthCheckId, err)
+								return false
+							}
+							healthCheckConfigToProviderSpecific(healthCheck.HealthCheckConfig, ep)
+						}
 					}
 
 					switch {
@@ -384,6 +410,8 @@ func (p *AWSProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) e
 	if err != nil {
 		return err
 	}
+
+	p.updateHealthChecksCache()
 
 	records, ok := ctx.Value(RecordsContextKey).([]*endpoint.Endpoint)
 	if !ok {
@@ -577,6 +605,15 @@ func (p *AWSProvider) newChange(action string, ep *endpoint.Endpoint, recordsCac
 
 		if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckID); ok {
 			change.ResourceRecordSet.HealthCheckId = aws.String(prop.Value)
+		} else {
+			healthCheckID, err := p.createHealthCheckIfNeeded(ep)
+			if err != nil {
+				log.Error(err.Error())
+			}
+
+			if healthCheckID != "" {
+				change.ResourceRecordSet.HealthCheckId = aws.String(healthCheckID)
+			}
 		}
 	}
 
@@ -840,9 +877,7 @@ func isExternalDNSOwner(tagset map[string]string) bool {
 	return false
 }
 
-func healthCheckToProviderSpecific(hc *route53.HealthCheck, ep *endpoint.Endpoint) {
-	hcConfig := hc.HealthCheckConfig
-
+func healthCheckConfigToProviderSpecific(hcConfig *route53.HealthCheckConfig, ep *endpoint.Endpoint) {
 	if hcConfig.Disabled != nil && *hcConfig.Disabled {
 		ep.WithProviderSpecific(providerSpecificHealthCheckDisabled, fmt.Sprintf("%t", aws.BoolValue(hcConfig.Disabled)))
 	}
@@ -880,7 +915,7 @@ func healthCheckToProviderSpecific(hc *route53.HealthCheck, ep *endpoint.Endpoin
 	}
 }
 
-func providerSpecificToHealthCheck(ep *endpoint.Endpoint) *route53.HealthCheckConfig {
+func providerSpecificToHealthCheckConfig(ep *endpoint.Endpoint) *route53.HealthCheckConfig {
 	hcConfig := &route53.HealthCheckConfig{}
 
 	if prop, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckDisabled); ok {
@@ -927,4 +962,139 @@ func providerSpecificToHealthCheck(ep *endpoint.Endpoint) *route53.HealthCheckCo
 	}
 
 	return hcConfig
+}
+
+func (p *AWSProvider) getHealthCheck(healthCheckID string) (*route53.HealthCheck, error) {
+	input := &route53.GetHealthCheckInput{
+		HealthCheckId: aws.String(healthCheckID),
+	}
+	output, err := p.client.GetHealthCheck(input)
+	if err != nil {
+		return nil, err
+	}
+
+	return output.HealthCheck, nil
+}
+
+func (p *AWSProvider) createHealthCheckIfNeeded(ep *endpoint.Endpoint) (string, error) {
+	hcConfig := providerSpecificToHealthCheckConfig(ep)
+	log.Infof("endpoint labels when creating health check is %s for %s", ep.Labels, ep.RecordType)
+
+	ownerID := ep.Labels[endpoint.OwnerLabelKey]
+	resource := ep.Labels[endpoint.ResourceLabelKey]
+
+	healthCheckID, exists := p.healthCheckExists(ownerID, resource)
+	if exists {
+		log.Infof("health check %q already exists for owner %q", healthCheckID, ownerID)
+		return healthCheckID, nil
+	}
+
+	createHCRequestInput := &route53.CreateHealthCheckInput{
+		HealthCheckConfig: hcConfig,
+		//CallerReference can *never* be used again. so we can't use owner string or any predictable uuid
+		CallerReference: aws.String(time.Now().String()),
+	}
+
+	log.Infof("desired change to create health check %s", createHCRequestInput)
+	if p.dryRun {
+		return "", nil
+	}
+
+	output, err := p.client.CreateHealthCheck(createHCRequestInput)
+	if err != nil {
+		return "", err
+	}
+
+	if len(ep.Labels) == 0 {
+		return aws.StringValue(output.HealthCheck.Id), nil
+	}
+
+	tagRequest := &route53.ChangeTagsForResourceInput{
+		ResourceId:   output.HealthCheck.Id,
+		ResourceType: aws.String(route53.TagResourceTypeHealthcheck),
+		AddTags: []*route53.Tag{
+			{
+				Key:   aws.String("owner"),
+				Value: aws.String(ep.Labels["owner"]),
+			},
+			{
+				Key:   aws.String("resource"),
+				Value: aws.String(ep.Labels["resource"]),
+			},
+		},
+	}
+
+	tagRequestOutput, err := p.client.ChangeTagsForResource(tagRequest)
+	if err != nil {
+		//TODO (rjindal): how should we handle this failure?
+		return "", err
+	}
+
+	p.healthChecks = append(p.healthChecks, healthCheck{
+		HealthCheck: output.HealthCheck,
+		Tags: map[string]string{
+			"owner":    ep.Labels["owner"],
+			"resource": ep.Labels["resource"],
+		},
+	})
+
+	log.Infof("output of creation of health check %s with tags o/p %s", output.HealthCheck, tagRequestOutput)
+	return aws.StringValue(output.HealthCheck.Id), nil
+}
+
+type healthCheck struct {
+	HealthCheck *route53.HealthCheck
+	Tags        map[string]string
+}
+
+func (p *AWSProvider) updateHealthChecksCache() error {
+	input := &route53.ListHealthChecksInput{}
+
+	healthChecks := []healthCheck{}
+	var response *route53.ListHealthChecksOutput
+	var err error
+	for {
+		if response != nil && !aws.BoolValue(response.IsTruncated) {
+			break
+		}
+
+		if response != nil {
+			input.Marker = response.NextMarker
+		}
+
+		response, err = p.client.ListHealthChecks(input)
+		if err != nil {
+			return err
+		}
+
+		for _, hc := range response.HealthChecks {
+			tags, err := p.tagsForHealthCheck(aws.StringValue(hc.Id))
+			if err != nil {
+				return err
+			}
+
+			healthChecks = append(healthChecks, healthCheck{
+				HealthCheck: hc,
+				Tags:        tags,
+			})
+		}
+	}
+
+	return nil
+}
+
+func (p *AWSProvider) healthCheckExists(ownerID, resource string) (string, bool) {
+	for _, hc := range p.healthChecks {
+		if value, ok := hc.Tags[endpoint.OwnerLabelKey]; !ok || value != ownerID {
+			return "", false
+		}
+
+		if value, ok := hc.Tags[endpoint.ResourceLabelKey]; !ok || value != resource {
+			return "", false
+		}
+
+		return aws.StringValue(hc.HealthCheck.Id), true
+	}
+
+	return "", false
 }
