@@ -72,6 +72,22 @@ func NewRoute53APIStub() *Route53APIStub {
 	}
 }
 
+func (r *Route53APIStub) ChangeTagsForResource(input *route53.ChangeTagsForResourceInput) (*route53.ChangeTagsForResourceOutput, error) {
+	return &route53.ChangeTagsForResourceOutput{}, nil
+}
+
+func (r *Route53APIStub) ListHealthChecks(input *route53.ListHealthChecksInput) (*route53.ListHealthChecksOutput, error) {
+	return &route53.ListHealthChecksOutput{}, nil
+}
+
+func (r *Route53APIStub) CreateHealthCheck(input *route53.CreateHealthCheckInput) (*route53.CreateHealthCheckOutput, error) {
+	return &route53.CreateHealthCheckOutput{}, nil
+}
+
+func (r *Route53APIStub) GetHealthCheck(input *route53.GetHealthCheckInput) (*route53.GetHealthCheckOutput, error) {
+	return &route53.GetHealthCheckOutput{}, nil
+}
+
 func (r *Route53APIStub) ListResourceRecordSetsPages(input *route53.ListResourceRecordSetsInput, fn func(p *route53.ListResourceRecordSetsOutput, lastPage bool) (shouldContinue bool)) error {
 	output := route53.ListResourceRecordSetsOutput{} // TODO: Support optional input args.
 	if len(r.recordSets) <= 0 {
@@ -100,6 +116,26 @@ func NewRoute53APICounter(w Route53API) *Route53APICounter {
 		wrapped: w,
 		calls:   map[string]int{},
 	}
+}
+
+func (c *Route53APICounter) ChangeTagsForResource(input *route53.ChangeTagsForResourceInput) (*route53.ChangeTagsForResourceOutput, error) {
+	c.calls["ChangeTagsForResource"]++
+	return c.wrapped.ChangeTagsForResource(input)
+}
+
+func (c *Route53APICounter) ListHealthChecks(input *route53.ListHealthChecksInput) (*route53.ListHealthChecksOutput, error) {
+	c.calls["ListHealthChecks"]++
+	return c.wrapped.ListHealthChecks(input)
+}
+
+func (c *Route53APICounter) CreateHealthCheck(input *route53.CreateHealthCheckInput) (*route53.CreateHealthCheckOutput, error) {
+	c.calls["CreateHealthCheck"]++
+	return c.wrapped.CreateHealthCheck(input)
+}
+
+func (c *Route53APICounter) GetHealthCheck(input *route53.GetHealthCheckInput) (*route53.GetHealthCheckOutput, error) {
+	c.calls["GetHealthCheck"]++
+	return c.wrapped.GetHealthCheck(input)
 }
 
 func (c *Route53APICounter) ListResourceRecordSetsPages(input *route53.ListResourceRecordSetsInput, fn func(resp *route53.ListResourceRecordSetsOutput, lastPage bool) (shouldContinue bool)) error {

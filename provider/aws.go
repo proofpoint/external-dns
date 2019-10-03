@@ -310,7 +310,7 @@ func (p *AWSProvider) records(zones map[string]*route53.HostedZone) ([]*endpoint
 					if r.HealthCheckId != nil {
 						tags, err := p.tagsForHealthCheck(aws.StringValue(r.HealthCheckId))
 						if err != nil {
-							log.Errorf("failed to get health check tags for health check id %s. error: %v", r.HealthCheckId, err)
+							log.Errorf("failed to get health check tags for health check id %s. error: %v", aws.StringValue(r.HealthCheckId), err)
 							return false
 						}
 
@@ -325,7 +325,7 @@ func (p *AWSProvider) records(zones map[string]*route53.HostedZone) ([]*endpoint
 							// and make changes accordingly.
 							healthCheck, err := p.getHealthCheck(aws.StringValue(r.HealthCheckId))
 							if err != nil {
-								log.Errorf("failed to get health check with id %q. error: %v", r.HealthCheckId, err)
+								log.Errorf("failed to get health check with id %q. error: %v", aws.StringValue(r.HealthCheckId), err)
 								return false
 							}
 							healthCheckConfigToProviderSpecific(healthCheck.HealthCheckConfig, ep)
@@ -977,6 +977,10 @@ func (p *AWSProvider) getHealthCheck(healthCheckID string) (*route53.HealthCheck
 }
 
 func (p *AWSProvider) createHealthCheckIfNeeded(ep *endpoint.Endpoint) (string, error) {
+	if _, ok := ep.GetProviderSpecificProperty(providerSpecificHealthCheckFQDN); !ok {
+		return "", nil
+	}
+
 	hcConfig := providerSpecificToHealthCheckConfig(ep)
 	log.Infof("endpoint labels when creating health check is %s for %s", ep.Labels, ep.RecordType)
 
