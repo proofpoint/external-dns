@@ -984,8 +984,16 @@ func (p *AWSProvider) createHealthCheckIfNeeded(ep *endpoint.Endpoint) (string, 
 	hcConfig := providerSpecificToHealthCheckConfig(ep)
 	log.Infof("endpoint labels when creating health check is %s for %s", ep.Labels, ep.RecordType)
 
-	ownerID := ep.Labels[endpoint.OwnerLabelKey]
-	resource := ep.Labels[endpoint.ResourceLabelKey]
+	var ownerID, resource string
+
+	if ep.RecordType == endpoint.RecordTypeTXT {
+		labels, _ := endpoint.NewLabelsFromString(ep.Targets[0])
+		ownerID = labels[endpoint.OwnerLabelKey]
+		resource = labels[endpoint.ResourceLabelKey]
+	} else {
+		ownerID = ep.Labels[endpoint.OwnerLabelKey]
+		resource = ep.Labels[endpoint.ResourceLabelKey]
+	}
 
 	healthCheckID, exists := p.healthCheckExists(ownerID, resource)
 	if exists {
